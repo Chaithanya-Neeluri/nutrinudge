@@ -89,9 +89,13 @@ def filter_by_condition(r, condition):
 
 def filter_by_preference(r, pref):
     name = r["recipe_name"].lower()
-    if pref == "Vegetarian" and any(x in name for x in ["chicken", "egg", "meat", "fish"]):
+    if pref == "Vegetarian" and any(x in name for x in ["chicken", "egg", "meat", "fish", "mutton", "beef", "pork", "prawn", "crab", "seafood"]):
         return False
-    if pref == "Vegan" and any(x in name for x in ["milk", "curd", "cheese", "paneer", "ghee", "butter", "egg", "yogurt"]):
+    if pref == "Non Vegetarian":
+        # For non-vegetarian preference, we can include both veg and non-veg items
+        # No filtering needed, accept all recipes
+        return True
+    if pref == "Vegan" and any(x in name for x in ["milk", "curd", "cheese", "paneer", "ghee", "butter", "egg", "yogurt", "honey", "chicken", "meat", "fish", "mutton", "beef", "pork", "prawn", "crab", "seafood"]):
         return False
     if pref == "Keto" and r.get("carbohydrate", 0) > 15:
         return False
@@ -106,6 +110,101 @@ def score_recipe(r, nutrients):
     if "Fibre" in nutrients: score += r.get("fibre", 0) * 1.5
     if "Calcium" in nutrients: score += r.get("calcium", 0) * 1.2
     return score
+
+def get_fallback_recipe(meal_type, all_recipes):
+    """Get a default recipe for each meal type when no suitable recipe is found"""
+    fallback_recipes = {
+        "pre_breakfast": {
+            "recipe_name": "Warm Water with Lemon",
+            "recipe_code": "default_pre_breakfast",
+            "calories": 5,
+            "protein": 0,
+            "carbohydrate": 1,
+            "fat": 0,
+            "fibre": 0,
+            "iron": 0,
+            "calcium": 2
+        },
+        "breakfast": {
+            "recipe_name": "Basic Oats with Milk",
+            "recipe_code": "default_breakfast",
+            "calories": 150,
+            "protein": 6,
+            "carbohydrate": 25,
+            "fat": 3,
+            "fibre": 4,
+            "iron": 1,
+            "calcium": 120
+        },
+        "salads": {
+            "recipe_name": "Mixed Green Salad",
+            "recipe_code": "default_salad",
+            "calories": 50,
+            "protein": 2,
+            "carbohydrate": 8,
+            "fat": 1,
+            "fibre": 3,
+            "iron": 1,
+            "calcium": 40
+        },
+        "fruits": {
+            "recipe_name": "Seasonal Fresh Fruit",
+            "recipe_code": "default_fruit",
+            "calories": 80,
+            "protein": 1,
+            "carbohydrate": 20,
+            "fat": 0,
+            "fibre": 3,
+            "iron": 0,
+            "calcium": 15
+        },
+        "lunch": {
+            "recipe_name": "Simple Dal Rice",
+            "recipe_code": "default_lunch",
+            "calories": 300,
+            "protein": 12,
+            "carbohydrate": 55,
+            "fat": 4,
+            "fibre": 8,
+            "iron": 3,
+            "calcium": 50
+        },
+        "snacks": {
+            "recipe_name": "Handful of Mixed Nuts",
+            "recipe_code": "default_snack",
+            "calories": 120,
+            "protein": 4,
+            "carbohydrate": 6,
+            "fat": 10,
+            "fibre": 2,
+            "iron": 1,
+            "calcium": 30
+        },
+        "dinner": {
+            "recipe_name": "Light Vegetable Soup",
+            "recipe_code": "default_dinner",
+            "calories": 100,
+            "protein": 3,
+            "carbohydrate": 15,
+            "fat": 2,
+            "fibre": 4,
+            "iron": 1,
+            "calcium": 25
+        },
+        "post_dinner": {
+            "recipe_name": "Warm Turmeric Milk",
+            "recipe_code": "default_post_dinner",
+            "calories": 80,
+            "protein": 4,
+            "carbohydrate": 8,
+            "fat": 3,
+            "fibre": 0,
+            "iron": 0,
+            "calcium": 120
+        }
+    }
+    
+    return fallback_recipes.get(meal_type, fallback_recipes["snacks"])
 
 @app.get("/")
 def read_root():
@@ -146,24 +245,37 @@ def generate_plan(user: UserInput):
         meal_types = ["pre_breakfast", "breakfast", "salads", "fruits", "lunch", "snacks", "dinner", "post_dinner"]
 
         weekly_plan = {}
-        used_recipes = set()  # Track used recipes to avoid repetition
+        used_recipes = {}  # Track used recipes per category to avoid repetition
         
         for day in days:
             day_plan = {}
             for meal in meal_types:
-                options = [r for r in filtered_map.get(meal, []) if r.get("recipe_code") not in used_recipes]
-                if options:
-                    chosen = options[0]
-                    used_recipes.add(chosen.get("recipe_code"))
+                available_recipes = filtered_map.get(meal, [])
+                
+                # Initialize used_recipes for this meal type if not exists
+                if meal not in used_recipes:
+                    used_recipes[meal] = set()
+                
+                # Find unused recipes first
+                unused_recipes = [r for r in available_recipes if r.get("recipe_code") not in used_recipes[meal]]
+                
+                if unused_recipes:
+                    # Use the highest scored unused recipe
+                    chosen = unused_recipes[0]
+                    used_recipes[meal].add(chosen.get("recipe_code"))
+                    day_plan[meal] = chosen
+                elif available_recipes:
+                    # If all recipes are used, reset and reuse from the beginning
+                    if len(used_recipes[meal]) >= len(available_recipes):
+                        used_recipes[meal] = set()
+                    
+                    chosen = random.choice(available_recipes)
+                    used_recipes[meal].add(chosen.get("recipe_code"))
                     day_plan[meal] = chosen
                 else:
-                    # Fallback if no unused recipes available
-                    fallback_options = filtered_map.get(meal, [])
-                    if fallback_options:
-                        chosen = random.choice(fallback_options)
-                        day_plan[meal] = chosen
-                    else:
-                        day_plan[meal] = {"recipe_name": "No suitable recipe", "recipe_code": None}
+                    # No suitable recipes found, use fallback
+                    day_plan[meal] = get_fallback_recipe(meal, category_map)
+                    
             weekly_plan[day] = day_plan
 
         return {"status": "success", "tdee": round(tdee), "plan": weekly_plan}
