@@ -8,7 +8,7 @@ import random
 app = FastAPI()
 
 # Load recipe data
-with open("weekly_recipe_nutrition (2).json") as f:
+with open("weekly_recipe_nutrition.json") as f:
     recipes = json.load(f)
 
 # Classify recipe into meal categories
